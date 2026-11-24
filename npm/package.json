@@ -1,0 +1,15 @@
+{
+  "name": "tockward",
+  "version": "0.1.0",
+  "description": "Heartbeat client for Tockward: know when your cron jobs, scripts and devices go silent.",
+  "main": "index.js",
+  "bin": { "tockward": "bin/tockward.js" },
+  "files": ["index.js", "bin/", "README.md", "LICENSE"],
+  "engines": { "node": ">=18" },
+  "keywords": ["cron", "monitoring", "heartbeat", "dead-mans-switch", "cronjob", "uptime", "alerting"],
+  "homepage": "https://tockward.com",
+  "repository": { "type": "git", "url": "git+https://github.com/tockward/tockward-cli.git" },
+  "bugs": { "url": "https://github.com/tockward/tockward-cli/issues", "email": "support@tockward.com" },
+  "author": "Tockward <support@tockward.com>",
+  "license": "MIT"
+}
