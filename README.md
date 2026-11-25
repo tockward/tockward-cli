@@ -54,6 +54,9 @@ a short summary: repo, branch and commit names, never file names or code.
 | `--behind-after <t>` | only alert when it has been behind for longer than `t` (`30m`, `2h`, `1d`), so a deploy or mirror sync in progress doesn't alert |
 | `--depth <n>` | how deep to look for repos under the folder (default 3) |
 
+A checkout without a remote (code pushed straight into the folder it runs from) has nothing to compare
+with: then `--deploy` only checks for files changed by hand and the branch.
+
 Exit code 0 when all is well, 1 when something's wrong, 2 when the check itself couldn't run.
 
 ## In code

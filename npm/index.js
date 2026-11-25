@@ -71,6 +71,8 @@ class OutputTail {
 // "exited with code 3: <last line>", then as much of the last output as fits.
 function failureMessage(headline, lines) {
   const first = (lines.length ? `${headline}: ${lines[lines.length - 1].trim()}` : headline).slice(0, 200);
+  // A single line is already in the headline: no "Last output" then.
+  if (lines.length === 1 && first.endsWith(lines[0].trim())) return first;
   const kept = [];
   let size = first.length + '\n\nLast output:'.length;
   for (let i = lines.length - 1; i >= 0; i--) {

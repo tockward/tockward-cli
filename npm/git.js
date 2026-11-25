@@ -159,9 +159,15 @@ function checkDeploy(dir, o) {
   if (changed) problems.push({ kind: 'changed', text: `${changed} file${changed === 1 ? '' : 's'} changed on the server` });
 
   const remote = pickRemote(dir, o.remote);
-  if (!remote) throw new CheckError(o.remote ? `${dir} has no remote ${o.remote}` : `${dir} has no remote to compare with`);
+  if (!remote && o.remote) throw new CheckError(`${dir} has no remote ${o.remote}`);
   const current = (git(dir, ['symbolic-ref', '--short', '-q', 'HEAD'], { allowFail: true }) || '').trim();
   const head = git(dir, ['rev-parse', 'HEAD']).trim();
+  if (!remote) {
+    // One copy only (pushed straight into this folder): nothing to compare
+    // with, so only files changed by hand and the branch are checked.
+    if (o.branch && current !== o.branch) problems.push({ kind: 'branch', text: `on ${current ? `branch ${current}` : 'a detached HEAD'}, expected ${o.branch}` });
+    return { problems, branch: current || 'detached HEAD', head, local: true };
+  }
   let branch = o.branch || current;
   if (!branch) {
     // Detached HEAD without --branch: the remote's default branch.
@@ -229,7 +235,7 @@ function run(token, args) {
     if (o.deploy) {
       const r = checkDeploy(folder, o);
       problems = r.problems;
-      summary = r.head ? `on ${r.branch} at ${short(r.head)}` : 'checked';
+      summary = r.head ? `on ${r.branch} at ${short(r.head)}${r.local ? ' (no remote: checked for changes only)' : ''}` : 'checked';
     } else {
       const repos = findRepos(folder, o.depth);
       if (!repos.length) throw new CheckError(`no git repos found in ${o.folder}`);

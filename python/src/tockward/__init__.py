@@ -17,7 +17,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 __all__ = ["ping", "fail", "beat_url", "TockwardError", "OutputTail", "failure_message"]
 
 DEFAULT_BASE = "https://ping.tockward.com"
@@ -117,6 +117,9 @@ class OutputTail:
 def failure_message(headline, lines):
     """"exited with code 3: <last line>", then as much of the last output as fits."""
     first = (f"{headline}: {lines[-1].strip()}" if lines else headline)[:200]
+    # A single line is already in the headline: no "Last output" then.
+    if len(lines) == 1 and first.endswith(lines[0].strip()):
+        return first
     kept = []
     size = len(first) + len("\n\nLast output:")
     for line in reversed(lines):

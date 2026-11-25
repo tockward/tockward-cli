@@ -206,10 +206,17 @@ def _check_deploy(d, o):
         problems.append({"kind": "changed", "text": f"{changed} file{'' if changed == 1 else 's'} changed on the server"})
 
     remote = _pick_remote(d, o["remote"])
-    if not remote:
-        raise CheckError(f"{d} has no remote {o['remote']}" if o["remote"] else f"{d} has no remote to compare with")
+    if not remote and o["remote"]:
+        raise CheckError(f"{d} has no remote {o['remote']}")
     current = (_git(d, ["symbolic-ref", "--short", "-q", "HEAD"], allow_fail=True) or "").strip()
     head = _git(d, ["rev-parse", "HEAD"]).strip()
+    if not remote:
+        # One copy only (pushed straight into this folder): nothing to compare
+        # with, so only files changed by hand and the branch are checked.
+        if o["branch"] and current != o["branch"]:
+            where = f"branch {current}" if current else "a detached HEAD"
+            problems.append({"kind": "branch", "text": f"on {where}, expected {o['branch']}"})
+        return {"problems": problems, "branch": current or "detached HEAD", "head": head, "local": True}
     branch = o["branch"] or current
     if not branch:
         # Detached HEAD without --branch: the remote's default branch.
@@ -296,7 +303,7 @@ def run(token, args):
         if o["deploy"]:
             r = _check_deploy(folder, o)
             problems = r["problems"]
-            summary = f"on {r['branch']} at {_short(r['head'])}" if r.get("head") else "checked"
+            summary = (f"on {r['branch']} at {_short(r['head'])}" + (" (no remote: checked for changes only)" if r.get("local") else "")) if r.get("head") else "checked"
         else:
             repos = find_repos(folder, o["depth"])
             if not repos:
