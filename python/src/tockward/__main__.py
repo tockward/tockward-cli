@@ -19,6 +19,11 @@ Usage:
   tockward git <token> [folder] [options]
                                       check git repos and report: ok, or
                                       fail with what's wrong (read-only)
+  tockward backup <token> <folder> [options]
+                                      check the backup files in a folder and
+                                      report: ok, or fail with what's wrong
+  tockward backup --detect <folder>   look at a backup folder and suggest
+                                      options (sends nothing)
 
 git options:
   (default)            every repo under folder (a Git server) must have the
@@ -30,6 +35,21 @@ git options:
                        Bitbucket, else origin)
   --behind-after <t>   only alert when behind for longer than t (30m, 2h)
   --depth <n>          how deep to look for repos (default 3)
+
+backup options (names, sizes and times only; files are never opened):
+  --kind <kind>        full (default): every file is a full backup
+                       incremental: fulls plus increments
+                       differential: fulls plus differentials that grow
+  --full <pattern>     which files are fulls, e.g. '*full*' (incremental,
+                       differential)
+  --full-day <day>     or: fulls are the ones made on this day (sun)
+  --match <pattern>    only files like this, e.g. '*.sql.gz'
+  --max-age <t>        the newest backup may be this old (default 26h)
+  --full-max-age <t>   the newest full may be this old (default 8d)
+  --min-size <size>    a full must be at least this big, e.g. 50MB
+  --drop <pct>         alert when a full is this much smaller than the one
+                       before (default 50%; 0 = off)
+  --depth <n>          also look n levels of subfolders deep (default 0)
 
 <token> is the monitor's token or its full ping URL.
 Set TOCKWARD_URL to use another server.  https://tockward.com"""
@@ -48,6 +68,12 @@ def main(argv=None):
         print(__version__)
         return 0
     cmd, rest = args[0], args[1:]
+    if cmd == "backup" and "--detect" in rest:
+        from . import backup
+        code, _, lines = backup.run(None, rest)
+        for line in lines:
+            print(line, file=sys.stderr if code else sys.stdout)
+        return code
     if not rest:
         warn("missing token")
         print(USAGE, file=sys.stderr)
@@ -65,9 +91,12 @@ def main(argv=None):
             warn(f"could not report: {err}")
             return 1
 
-    if cmd == "git":
-        from . import git
-        code, message, lines = git.run(token, rest)
+    if cmd in ("git", "backup"):
+        if cmd == "git":
+            from . import git as check
+        else:
+            from . import backup as check
+        code, message, lines = check.run(token, rest)
         for line in lines:
             print(line, file=sys.stderr if code else sys.stdout)
         try:

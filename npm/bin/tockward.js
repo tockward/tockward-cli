@@ -17,6 +17,11 @@ Usage:
   tockward git <token> [folder] [options]
                                       check git repos and report: ok, or
                                       fail with what's wrong (read-only)
+  tockward backup <token> <folder> [options]
+                                      check the backup files in a folder and
+                                      report: ok, or fail with what's wrong
+  tockward backup --detect <folder>   look at a backup folder and suggest
+                                      options (sends nothing)
 
 git options:
   (default)            every repo under folder (a Git server) must have the
@@ -29,6 +34,21 @@ git options:
   --behind-after <t>   only alert when behind for longer than t (30m, 2h)
   --depth <n>          how deep to look for repos (default 3)
 
+backup options (names, sizes and times only; files are never opened):
+  --kind <kind>        full (default): every file is a full backup
+                       incremental: fulls plus increments
+                       differential: fulls plus differentials that grow
+  --full <pattern>     which files are fulls, e.g. '*full*' (incremental,
+                       differential)
+  --full-day <day>     or: fulls are the ones made on this day (sun)
+  --match <pattern>    only files like this, e.g. '*.sql.gz'
+  --max-age <t>        the newest backup may be this old (default 26h)
+  --full-max-age <t>   the newest full may be this old (default 8d)
+  --min-size <size>    a full must be at least this big, e.g. 50MB
+  --drop <pct>         alert when a full is this much smaller than the one
+                       before (default 50%; 0 = off)
+  --depth <n>          also look n levels of subfolders deep (default 0)
+
 <token> is the monitor's token or its full ping URL.
 Set TOCKWARD_URL to use another server.  https://tockward.com`;
 
@@ -38,6 +58,11 @@ async function main(argv) {
   const [cmd, token, ...rest] = argv;
   if (!cmd || cmd === '-h' || cmd === '--help' || cmd === 'help') { console.log(USAGE); return 0; }
   if (cmd === '-v' || cmd === '--version') { console.log(version); return 0; }
+  if (cmd === 'backup' && (token === '--detect' || rest.includes('--detect'))) {
+    const result = require('../backup').run(null, token === '--detect' ? [token, ...rest] : rest);
+    for (const line of result.lines) (result.code ? process.stderr : process.stdout).write(`${line}\n`);
+    return result.code;
+  }
   if (!token) { warn('missing token'); console.error(USAGE); return 2; }
 
   if (cmd === 'ping' || cmd === 'fail') {
@@ -46,8 +71,8 @@ async function main(argv) {
     catch (err) { warn(`could not report: ${err.message}`); return 1; }
   }
 
-  if (cmd === 'git') {
-    const result = require('../git').run(token, rest);
+  if (cmd === 'git' || cmd === 'backup') {
+    const result = require(cmd === 'git' ? '../git' : '../backup').run(token, rest);
     for (const line of result.lines) (result.code ? process.stderr : process.stdout).write(`${line}\n`);
     try { await (result.code === 0 ? ping : fail)(token, { message: result.message }); }
     catch (err) { warn(`could not report: ${err.message}`); return result.code || 1; }

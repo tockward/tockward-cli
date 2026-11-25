@@ -19,6 +19,8 @@ Both give you the same `tockward` command. No dependencies.
 tockward ping <token>                  # report a successful run
 tockward fail <token> "disk full"       # report a failed run, optionally why
 tockward run <token> -- ./backup.sh    # run a command, then report success or failure
+tockward git <token> /var/www/app --deploy   # check git repos (see below)
+tockward backup <token> /backups/db    # check backup files (see below)
 ```
 
 `tockward run` passes the command's output through, sends its duration along, and exits
@@ -58,6 +60,46 @@ A checkout without a remote (code pushed straight into the folder it runs from) 
 with: then `--deploy` only checks for files changed by hand and the branch.
 
 Exit code 0 when all is well, 1 when something's wrong, 2 when the check itself couldn't run.
+
+## Backups
+
+`tockward backup` checks the backup files in a folder: the newest one is recent, not empty,
+and not suddenly much smaller than the one before. It only looks at names, sizes and times
+(files are never opened) and sends a one-line summary.
+
+```cron
+# A full backup every night
+30 6 * * *  tockward backup <token> /backups/db --match '*.sql.gz'
+
+# A weekly full plus nightly increments
+30 6 * * *  tockward backup <token> /backups/files --kind incremental --full '*full*'
+```
+
+Not sure which options fit? Let it look and suggest (it sends nothing):
+
+```
+$ tockward backup --detect /backups/files
+Found 31 files in the last 35 days, about one every 24 h, newest 5 h old.
+  4 large (2.1 GB, on Sundays): look like full backups
+  27 smaller (40 MB-310 MB): look like incrementals
+Suggestion: tockward backup <token> /backups/files --kind incremental --full '*full*' --max-age 26h --full-max-age 8d
+```
+
+| Option | Meaning |
+|---|---|
+| `--kind <kind>` | `full` (default): every file is a full backup. `incremental`: fulls plus increments. `differential`: fulls plus differentials that grow until the next full |
+| `--full <pattern>` | which files are fulls, e.g. `'*full*'` or `'*.vbk'` (incremental, differential) |
+| `--full-day <day>` | or: the fulls are the ones made on this day (`sun`) |
+| `--match <pattern>` | only files like this, e.g. `'*.sql.gz'` |
+| `--max-age <t>` | the newest backup may be this old (default `26h`) |
+| `--full-max-age <t>` | the newest full may be this old (default `8d`): increments are useless without it |
+| `--min-size <size>` | a full must be at least this big, e.g. `50MB` (default: not empty) |
+| `--drop <pct>` | alert when a full is this much smaller than the one before (default `50%`, `0` = off). A backup overwritten in place is compared with last run's |
+| `--depth <n>` | also look this many levels of subfolders deep (default 0) |
+
+Hidden files, partial uploads (`.tmp`, `.part`) and files changed in the last minute are skipped.
+For a reverse incremental backup (the newest file is always the full, like Veeam's `.vbk`),
+use the default kind with `--match '*.vbk'`. Exit codes as for `tockward git`.
 
 ## In code
 

@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tockward"
-version = "0.2.1"
+version = "0.3.0"
 description = "Heartbeat client for Tockward: know when your cron jobs, scripts and devices go silent."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.8"
 authors = [{ name = "Tockward", email = "support@tockward.com" }]
-keywords = ["cron", "monitoring", "heartbeat", "dead-mans-switch", "cronjob", "alerting"]
+keywords = ["cron", "monitoring", "heartbeat", "backup", "dead-mans-switch", "cronjob", "alerting"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Operating System :: OS Independent",

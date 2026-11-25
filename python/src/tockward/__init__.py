@@ -17,7 +17,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 __all__ = ["ping", "fail", "beat_url", "TockwardError", "OutputTail", "failure_message"]
 
 DEFAULT_BASE = "https://ping.tockward.com"
