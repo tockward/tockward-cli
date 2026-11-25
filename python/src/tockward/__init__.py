@@ -67,9 +67,9 @@ def _send(token, ok, ms=None, timeout=10, retries=2, message=None):
     raise last
 
 
-def ping(token, ms=None, timeout=10, retries=2):
+def ping(token, ms=None, timeout=10, retries=2, message=None):
     """Report a successful run."""
-    return _send(token, True, ms, timeout, retries)
+    return _send(token, True, ms, timeout, retries, message)
 
 
 def fail(token, ms=None, timeout=10, retries=2, message=None):

@@ -32,6 +32,30 @@ fails, the last lines of its output go along too, so the alert says why
 
 `<token>` is the monitor's token, or its full ping URL copied from the dashboard.
 
+## Git repos
+
+`tockward git` checks the git repos on a server and reports ok, or a failure saying what's
+wrong. It only reads (no fetch, no pull), uses the server's own git access, and sends just
+a short summary: repo, branch and commit names, never file names or code.
+
+```cron
+# Git server: every repo under /srv/git has the same branches and tags as GitHub/GitLab
+0 * * * *  tockward git <token> /srv/git --behind-after 12h
+
+# Production: nothing changed by hand, on the latest commit of main
+*/15 * * * *  tockward git <token> /var/www/app --deploy --branch main --behind-after 30m
+```
+
+| Option | Meaning |
+|---|---|
+| `--deploy` | the folder is one checkout (production) instead of a folder of repos |
+| `--branch <name>` | the branch it should be on (deploy; default: the current one) |
+| `--remote <name>` | compare with this remote (default: the GitHub, GitLab or Bitbucket one, else `origin`) |
+| `--behind-after <t>` | only alert when it has been behind for longer than `t` (`30m`, `2h`, `1d`), so a deploy or mirror sync in progress doesn't alert |
+| `--depth <n>` | how deep to look for repos under the folder (default 3) |
+
+Exit code 0 when all is well, 1 when something's wrong, 2 when the check itself couldn't run.
+
 ## In code
 
 ```js

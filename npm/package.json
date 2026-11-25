@@ -4,7 +4,7 @@
   "description": "Heartbeat client for Tockward: know when your cron jobs, scripts and devices go silent.",
   "main": "index.js",
   "bin": { "tockward": "bin/tockward.js" },
-  "files": ["index.js", "bin/", "README.md", "LICENSE"],
+  "files": ["index.js", "git.js", "bin/", "README.md", "LICENSE"],
   "engines": { "node": ">=18" },
   "keywords": ["cron", "monitoring", "heartbeat", "dead-mans-switch", "cronjob", "uptime", "alerting"],
   "homepage": "https://tockward.com",

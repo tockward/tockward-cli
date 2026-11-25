@@ -14,6 +14,20 @@ Usage:
                                       failure (with its duration, and on
                                       failure its last output lines); exits
                                       with the command's exit code
+  tockward git <token> [folder] [options]
+                                      check git repos and report: ok, or
+                                      fail with what's wrong (read-only)
+
+git options:
+  (default)            every repo under folder (a Git server) must have the
+                       same branches and tags as its hosted remote
+  --deploy             folder is a checkout (production): nothing changed by
+                       hand, on the remote's latest commit
+  --branch <name>      the branch it should be on (deploy)
+  --remote <name>      compare with this remote (default: GitHub, GitLab or
+                       Bitbucket, else origin)
+  --behind-after <t>   only alert when behind for longer than t (30m, 2h)
+  --depth <n>          how deep to look for repos (default 3)
 
 <token> is the monitor's token or its full ping URL.
 Set TOCKWARD_URL to use another server.  https://tockward.com`;
@@ -30,6 +44,14 @@ async function main(argv) {
     const message = cmd === 'fail' ? rest.join(' ').trim() : '';
     try { await (cmd === 'ping' ? ping : fail)(token, { message }); return 0; }
     catch (err) { warn(`could not report: ${err.message}`); return 1; }
+  }
+
+  if (cmd === 'git') {
+    const result = require('../git').run(token, rest);
+    for (const line of result.lines) (result.code ? process.stderr : process.stdout).write(`${line}\n`);
+    try { await (result.code === 0 ? ping : fail)(token, { message: result.message }); }
+    catch (err) { warn(`could not report: ${err.message}`); return result.code || 1; }
+    return result.code;
   }
 
   if (cmd === 'run') {

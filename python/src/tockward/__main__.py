@@ -16,6 +16,20 @@ Usage:
                                       failure (with its duration, and on
                                       failure its last output lines); exits
                                       with the command's exit code
+  tockward git <token> [folder] [options]
+                                      check git repos and report: ok, or
+                                      fail with what's wrong (read-only)
+
+git options:
+  (default)            every repo under folder (a Git server) must have the
+                       same branches and tags as its hosted remote
+  --deploy             folder is a checkout (production): nothing changed by
+                       hand, on the remote's latest commit
+  --branch <name>      the branch it should be on (deploy)
+  --remote <name>      compare with this remote (default: GitHub, GitLab or
+                       Bitbucket, else origin)
+  --behind-after <t>   only alert when behind for longer than t (30m, 2h)
+  --depth <n>          how deep to look for repos (default 3)
 
 <token> is the monitor's token or its full ping URL.
 Set TOCKWARD_URL to use another server.  https://tockward.com"""
@@ -50,6 +64,18 @@ def main(argv=None):
         except (TockwardError, ValueError) as err:
             warn(f"could not report: {err}")
             return 1
+
+    if cmd == "git":
+        from . import git
+        code, message, lines = git.run(token, rest)
+        for line in lines:
+            print(line, file=sys.stderr if code else sys.stdout)
+        try:
+            (ping if code == 0 else fail)(token, message=message)
+        except (TockwardError, ValueError) as err:
+            warn(f"could not report: {err}")
+            return code or 1
+        return code
 
     if cmd == "run":
         command = rest[1:] if rest[:1] == ["--"] else rest
