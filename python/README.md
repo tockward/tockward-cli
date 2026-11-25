@@ -17,6 +17,8 @@ Both give you the same `tockward` command. No dependencies.
 
 ```sh
 tockward ping <token>                  # report a successful run
+tockward ping <token> --value 12400    # ... with a number to chart (rows imported, files sent)
+tockward ping <token> --value 145278836 --bytes   # ... a size, shown as 139 MB
 tockward fail <token> "disk full"       # report a failed run, optionally why
 tockward run <token> -- ./backup.sh    # run a command, then report success or failure
 tockward git <token> /var/www/app --deploy   # check git repos (see below)
@@ -65,7 +67,8 @@ Exit code 0 when all is well, 1 when something's wrong, 2 when the check itself 
 
 `tockward backup` checks the backup files in a folder: the newest one is recent, not empty,
 and not suddenly much smaller than the one before. It only looks at names, sizes and times
-(files are never opened) and sends a one-line summary.
+(files are never opened) and sends a one-line summary, plus the size of the newest full
+backup, which the monitor page shows as a chart over 30 days.
 
 ```cron
 # A full backup every night
@@ -107,12 +110,16 @@ use the default kind with `--match '*.vbk'`. Exit codes as for `tockward git`.
 const tockward = require('tockward');
 await tockward.ping('abc123');
 await tockward.fail('abc123', { message: 'disk full' });
+await tockward.ping('abc123', { value: 12400 });                     // a number to chart
+await tockward.ping('abc123', { value: 145278836, unit: 'bytes' });  // a size
 ```
 
 ```python
 import tockward
 tockward.ping("abc123")
 tockward.fail("abc123", message="disk full")
+tockward.ping("abc123", value=12400)                     # a number to chart
+tockward.ping("abc123", value=145278836, unit="bytes")   # a size
 ```
 
 Delivery is retried twice with a 10-second timeout per attempt; an unknown token fails at once.
