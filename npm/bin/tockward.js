@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 'use strict';
 const { spawn } = require('child_process');
-const { ping, fail } = require('..');
+const os = require('os');
+const { ping, fail, OutputTail, failureMessage } = require('..');
 const { version } = require('../package.json');
 
 const USAGE = `Tockward: know when your cron jobs, scripts and devices go silent.
 
 Usage:
   tockward ping <token>               report a successful run
-  tockward fail <token>               report a failed run
+  tockward fail <token> [message]     report a failed run, optionally why
   tockward run <token> -- <command>   run a command, then report success or
-                                      failure (with its duration); exits with
-                                      the command's exit code
+                                      failure (with its duration, and on
+                                      failure its last output lines); exits
+                                      with the command's exit code
 
 <token> is the monitor's token or its full ping URL.
 Set TOCKWARD_URL to use another server.  https://tockward.com`;
@@ -25,7 +27,8 @@ async function main(argv) {
   if (!token) { warn('missing token'); console.error(USAGE); return 2; }
 
   if (cmd === 'ping' || cmd === 'fail') {
-    try { await (cmd === 'ping' ? ping : fail)(token); return 0; }
+    const message = cmd === 'fail' ? rest.join(' ').trim() : '';
+    try { await (cmd === 'ping' ? ping : fail)(token, { message }); return 0; }
     catch (err) { warn(`could not report: ${err.message}`); return 1; }
   }
 
@@ -33,12 +36,27 @@ async function main(argv) {
     const command = rest[0] === '--' ? rest.slice(1) : rest;
     if (!command.length) { warn('nothing to run; use: tockward run <token> -- <command>'); return 2; }
     const started = Date.now();
+    // Output still goes to the terminal or cron log as it comes; the last
+    // lines are kept for the failure message.
+    const tail = new OutputTail();
+    let headline = '';
     const code = await new Promise(resolve => {
-      const child = spawn(command[0], command.slice(1), { stdio: 'inherit' });
-      child.on('error', err => { warn(`could not start ${command[0]}: ${err.message}`); resolve(127); });
-      child.on('exit', (c, signal) => resolve(signal ? 128 : c));
+      const child = spawn(command[0], command.slice(1), { stdio: ['inherit', 'pipe', 'pipe'] });
+      child.stdout.on('data', d => { process.stdout.write(d); tail.write(d); });
+      child.stderr.on('data', d => { process.stderr.write(d); tail.write(d); });
+      child.on('error', err => {
+        headline = `could not start ${command[0]}: ${err.message}`;
+        warn(headline);
+        resolve(127);
+      });
+      child.on('close', (c, signal) => {
+        if (headline) return;
+        headline = signal ? `killed by ${signal}` : `exited with code ${c}`;
+        resolve(signal ? 128 + (os.constants.signals[signal] || 0) : c);
+      });
     });
-    try { await (code === 0 ? ping : fail)(token, { ms: Date.now() - started }); }
+    const ms = Date.now() - started;
+    try { await (code === 0 ? ping(token, { ms }) : fail(token, { ms, message: failureMessage(headline, tail.last) })); }
     catch (err) { warn(`could not report: ${err.message}`); }
     return code;
   }

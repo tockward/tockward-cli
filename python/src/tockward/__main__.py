@@ -1,17 +1,21 @@
+import os
+import signal
 import subprocess
 import sys
+import threading
 import time
 
-from . import TockwardError, __version__, fail, ping
+from . import OutputTail, TockwardError, __version__, fail, failure_message, ping
 
 USAGE = """Tockward: know when your cron jobs, scripts and devices go silent.
 
 Usage:
   tockward ping <token>               report a successful run
-  tockward fail <token>               report a failed run
+  tockward fail <token> [message]     report a failed run, optionally why
   tockward run <token> -- <command>   run a command, then report success or
-                                      failure (with its duration); exits with
-                                      the command's exit code
+                                      failure (with its duration, and on
+                                      failure its last output lines); exits
+                                      with the command's exit code
 
 <token> is the monitor's token or its full ping URL.
 Set TOCKWARD_URL to use another server.  https://tockward.com"""
@@ -38,7 +42,10 @@ def main(argv=None):
 
     if cmd in ("ping", "fail"):
         try:
-            (ping if cmd == "ping" else fail)(token)
+            if cmd == "ping":
+                ping(token)
+            else:
+                fail(token, message=" ".join(rest).strip() or None)
             return 0
         except (TockwardError, ValueError) as err:
             warn(f"could not report: {err}")
@@ -50,16 +57,47 @@ def main(argv=None):
             warn("nothing to run; use: tockward run <token> -- <command>")
             return 2
         started = time.monotonic()
+        # Output still goes to the terminal or cron log as it comes; the
+        # last lines are kept for the failure message.
+        tail = OutputTail()
+        lock = threading.Lock()
+
+        def pump(src, dst):
+            for chunk in iter(lambda: os.read(src.fileno(), 65536), b""):
+                dst.buffer.write(chunk)
+                dst.buffer.flush()
+                with lock:
+                    tail.write(chunk)
+
         try:
-            code = subprocess.call(command)
+            proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         except OSError as err:
-            warn(f"could not start {command[0]}: {err}")
+            headline = f"could not start {command[0]}: {err.strerror or err}"
+            warn(headline)
             code = 127
-        if code < 0:
-            code = 128 - code
+        else:
+            threads = [threading.Thread(target=pump, args=(proc.stdout, sys.stdout), daemon=True),
+                       threading.Thread(target=pump, args=(proc.stderr, sys.stderr), daemon=True)]
+            for t in threads:
+                t.start()
+            code = proc.wait()
+            for t in threads:
+                t.join()
+            if code < 0:
+                try:
+                    name = signal.Signals(-code).name
+                except ValueError:
+                    name = f"signal {-code}"
+                headline = f"killed by {name}"
+                code = 128 - code
+            else:
+                headline = f"exited with code {code}"
         ms = (time.monotonic() - started) * 1000
         try:
-            (ping if code == 0 else fail)(token, ms=ms)
+            if code == 0:
+                ping(token, ms=ms)
+            else:
+                fail(token, ms=ms, message=failure_message(headline, tail.last))
         except (TockwardError, ValueError) as err:
             warn(f"could not report: {err}")
         return code

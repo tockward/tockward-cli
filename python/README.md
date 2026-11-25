@@ -17,12 +17,14 @@ Both give you the same `tockward` command. No dependencies.
 
 ```sh
 tockward ping <token>                  # report a successful run
-tockward fail <token>                  # report a failed run
+tockward fail <token> "disk full"       # report a failed run, optionally why
 tockward run <token> -- ./backup.sh    # run a command, then report success or failure
 ```
 
 `tockward run` passes the command's output through, sends its duration along, and exits
-with the command's own exit code, so it drops straight into a crontab:
+with the command's own exit code, so it drops straight into a crontab. When the command
+fails, the last lines of its output go along too, so the alert says why
+(`exited with code 3: error: disk full`):
 
 ```cron
 0 3 * * *  tockward run abc123 -- /usr/local/bin/backup.sh
@@ -35,13 +37,13 @@ with the command's own exit code, so it drops straight into a crontab:
 ```js
 const tockward = require('tockward');
 await tockward.ping('abc123');
-await tockward.fail('abc123');
+await tockward.fail('abc123', { message: 'disk full' });
 ```
 
 ```python
 import tockward
 tockward.ping("abc123")
-tockward.fail("abc123")
+tockward.fail("abc123", message="disk full")
 ```
 
 Delivery is retried twice with a 10-second timeout per attempt; an unknown token fails at once.
@@ -53,6 +55,7 @@ It's just an HTTP request, so `curl` works too:
 ```sh
 curl -fsS https://ping.tockward.com/v1/beat/<token>        # success
 curl -fsS https://ping.tockward.com/v1/beat/<token>/fail   # failure
+curl -fsS -d "disk full" https://ping.tockward.com/v1/beat/<token>/fail   # failure, with why
 ```
 
 ## Settings
