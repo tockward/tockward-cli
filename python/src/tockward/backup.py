@@ -239,7 +239,7 @@ def _drop_text(f, before, drop, what):
 def _check(token, folder, o, now):
     files = _list_files(folder, o, now)
     if not files:
-        return [f"no backups found in {o['folder']}" + (f" matching {o['match']}" if o["match"] else "")], None
+        return [f"no backups found in {o['folder']}" + (f" matching {o['match']}" if o["match"] else "")], None, None
     problems = []
     newest = files[-1]
     fulls = [f for f in files if _is_full(f, o)]
@@ -292,7 +292,9 @@ def _check(token, folder, o, now):
         summary = f"{describe(newest)} ({n})"
     else:
         summary = f"newest {describe(newest)}; full {describe(full)} ({n})"
-    return problems, summary
+    # The size that goes along for the chart: the newest full, the backup
+    # whose size means something from night to night.
+    return problems, summary, (full or newest)["size"]
 
 
 # --- --detect: a suggestion, not a decision ---------------------------------
@@ -397,9 +399,10 @@ def _detect(folder, o, now):
 
 
 def run(token, args, now=None):
-    """Runs the check (or --detect). Returns (code, message, lines): code 0
-    ok, 1 problems, 2 the check itself failed; message is what goes to
-    Tockward (None for --detect, which sends nothing)."""
+    """Runs the check (or --detect). Returns (code, message, lines, size):
+    code 0 ok, 1 problems, 2 the check itself failed; message is what goes
+    to Tockward (None for --detect, which sends nothing); size is the
+    newest full backup's, sent along for the chart (None when unknown)."""
     now = int(time.time()) if now is None else now
     try:
         o = parse_args(args)
@@ -409,12 +412,12 @@ def run(token, args, now=None):
         if not os.path.isdir(folder):
             raise CheckError(f"{o['folder']} is not a folder")
         if o["detect"]:
-            return 0, None, _detect(folder, o, now)
-        problems, summary = _check(token, folder, o, now)
+            return 0, None, _detect(folder, o, now), None
+        problems, summary, size = _check(token, folder, o, now)
         if not problems:
             ok = f"ok: {summary}"
-            return 0, ok, [ok]
-        return 1, "\n".join(problems), problems
+            return 0, ok, [ok], size
+        return 1, "\n".join(problems), problems, size
     except CheckError as err:
         msg = f"backup check failed: {err}"
-        return 2, msg, [msg]
+        return 2, msg, [msg], None

@@ -8,7 +8,10 @@ const { version } = require('../package.json');
 const USAGE = `Tockward: know when your cron jobs, scripts and devices go silent.
 
 Usage:
-  tockward ping <token>               report a successful run
+  tockward ping <token> [--value <n>] [--bytes]
+                                      report a successful run, optionally
+                                      with a number to chart (a size with
+                                      --bytes)
   tockward fail <token> [message]     report a failed run, optionally why
   tockward run <token> -- <command>   run a command, then report success or
                                       failure (with its duration, and on
@@ -66,15 +69,27 @@ async function main(argv) {
   if (!token) { warn('missing token'); console.error(USAGE); return 2; }
 
   if (cmd === 'ping' || cmd === 'fail') {
-    const message = cmd === 'fail' ? rest.join(' ').trim() : '';
-    try { await (cmd === 'ping' ? ping : fail)(token, { message }); return 0; }
+    let value, unit, words = rest;
+    if (cmd === 'ping') {
+      const i = rest.indexOf('--value');
+      if (i >= 0) {
+        value = Number(rest[i + 1]);
+        if (rest[i + 1] === undefined || !Number.isFinite(value)) { warn('--value needs a number'); return 2; }
+      }
+      if (rest.includes('--bytes')) unit = 'bytes';
+      words = [];
+    }
+    const message = cmd === 'fail' ? words.join(' ').trim() : '';
+    try { await (cmd === 'ping' ? ping : fail)(token, { message, value, unit }); return 0; }
     catch (err) { warn(`could not report: ${err.message}`); return 1; }
   }
 
   if (cmd === 'git' || cmd === 'backup') {
     const result = require(cmd === 'git' ? '../git' : '../backup').run(token, rest);
     for (const line of result.lines) (result.code ? process.stderr : process.stdout).write(`${line}\n`);
-    try { await (result.code === 0 ? ping : fail)(token, { message: result.message }); }
+    // backup sends the newest full backup's size along, for the chart.
+    const extra = Number.isFinite(result.value) ? { value: result.value, unit: 'bytes' } : {};
+    try { await (result.code === 0 ? ping : fail)(token, { message: result.message, ...extra }); }
     catch (err) { warn(`could not report: ${err.message}`); return result.code || 1; }
     return result.code;
   }

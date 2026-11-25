@@ -153,7 +153,7 @@ function dropText(f, before, drop, what) {
 
 function check(token, folder, o, now) {
   const files = listFiles(folder, o, now);
-  if (!files.length) return { problems: [`no backups found in ${o.folder}${o.match ? ` matching ${o.match}` : ''}`], summary: null };
+  if (!files.length) return { problems: [`no backups found in ${o.folder}${o.match ? ` matching ${o.match}` : ''}`], summary: null, size: null };
   const problems = [];
   const newest = files[files.length - 1];
   const fulls = files.filter(f => isFull(f, o));
@@ -193,7 +193,9 @@ function check(token, folder, o, now) {
   const summary = o.kind === 'full' || !full || newest === full
     ? `${describe(newest)} (${n})`
     : `newest ${describe(newest)}; full ${describe(full)} (${n})`;
-  return { problems, summary };
+  // The size that goes along for the chart: the newest full, the backup
+  // whose size means something from night to night.
+  return { problems, summary, size: (full || newest).size };
 }
 
 // --- --detect: a suggestion, not a decision -------------------------------
@@ -286,12 +288,12 @@ function run(token, args, now = Math.floor(Date.now() / 1000)) {
     try { st = fs.statSync(folder); } catch { throw new CheckError(`${o.folder} does not exist (not mounted?)`); }
     if (!st.isDirectory()) throw new CheckError(`${o.folder} is not a folder`);
     if (o.detect) return { code: 0, detect: true, message: null, lines: detect(folder, o, now) };
-    const { problems, summary } = check(token, folder, o, now);
+    const { problems, summary, size } = check(token, folder, o, now);
     if (!problems.length) {
       const ok = `ok: ${summary}`;
-      return { code: 0, message: ok, lines: [ok] };
+      return { code: 0, message: ok, lines: [ok], value: size };
     }
-    return { code: 1, message: problems.join('\n'), lines: problems };
+    return { code: 1, message: problems.join('\n'), lines: problems, value: size };
   } catch (err) {
     if (!(err instanceof CheckError)) throw err;
     return { code: 2, message: `backup check failed: ${err.message}`, lines: [`backup check failed: ${err.message}`] };

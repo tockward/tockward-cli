@@ -4,6 +4,8 @@
     tockward.ping("abc123")            # "I ran"
     tockward.fail("abc123")            # "I failed"
     tockward.ping("abc123", ms=4200)   # with the run's duration
+    tockward.ping("abc123", value=12400)   # a number to chart
+    tockward.ping("abc123", value=145278836, unit="bytes")   # a size
     tockward.fail("abc123", message="disk full")  # say why
 
 A token can also be a full ping URL (https://.../v1/beat/<token>), so URLs
@@ -17,7 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __all__ = ["ping", "fail", "beat_url", "TockwardError", "OutputTail", "failure_message"]
 
 DEFAULT_BASE = "https://ping.tockward.com"
@@ -29,7 +31,7 @@ class TockwardError(Exception):
     """The heartbeat could not be delivered."""
 
 
-def beat_url(token, ok=True, ms=None):
+def beat_url(token, ok=True, ms=None, value=None, unit=None):
     if not token or not isinstance(token, str):
         raise ValueError("missing token")
     if re.match(r"^https?://", token, re.I):
@@ -39,13 +41,23 @@ def beat_url(token, ok=True, ms=None):
         url = f"{base}/v1/beat/{urllib.parse.quote(token, safe='')}"
     if not ok:
         url += "/fail"
+    query = []
     if ms is not None:
-        url += f"?ms={max(0, round(ms))}"
-    return url
+        query.append(f"ms={max(0, round(ms))}")
+    if value is not None:
+        query.append(f"value={_num(value)}")
+        if unit == "bytes":
+            query.append("unit=bytes")
+    return f"{url}?{'&'.join(query)}" if query else url
 
 
-def _send(token, ok, ms=None, timeout=10, retries=2, message=None):
-    url = beat_url(token, ok, ms)
+def _num(v):
+    """A number as JavaScript writes it: 12400, not 12400.0."""
+    return str(int(v)) if float(v) == int(v) else repr(float(v))
+
+
+def _send(token, ok, ms=None, timeout=10, retries=2, message=None, value=None, unit=None):
+    url = beat_url(token, ok, ms, value, unit)
     data = str(message)[:MESSAGE_MAX].encode("utf-8") if message else b""
     headers = {"User-Agent": f"tockward-python/{__version__}"}
     if data:
@@ -67,14 +79,15 @@ def _send(token, ok, ms=None, timeout=10, retries=2, message=None):
     raise last
 
 
-def ping(token, ms=None, timeout=10, retries=2, message=None):
-    """Report a successful run."""
-    return _send(token, True, ms, timeout, retries, message)
+def ping(token, ms=None, timeout=10, retries=2, message=None, value=None, unit=None):
+    """Report a successful run; value is an optional number to chart
+    (unit="bytes" for a size)."""
+    return _send(token, True, ms, timeout, retries, message, value, unit)
 
 
-def fail(token, ms=None, timeout=10, retries=2, message=None):
+def fail(token, ms=None, timeout=10, retries=2, message=None, value=None, unit=None):
     """Report a failed run; message says why (shown in the alert)."""
-    return _send(token, False, ms, timeout, retries, message)
+    return _send(token, False, ms, timeout, retries, message, value, unit)
 
 
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")

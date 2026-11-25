@@ -10,7 +10,10 @@ from . import OutputTail, TockwardError, __version__, fail, failure_message, pin
 USAGE = """Tockward: know when your cron jobs, scripts and devices go silent.
 
 Usage:
-  tockward ping <token>               report a successful run
+  tockward ping <token> [--value <n>] [--bytes]
+                                      report a successful run, optionally
+                                      with a number to chart (a size with
+                                      --bytes)
   tockward fail <token> [message]     report a failed run, optionally why
   tockward run <token> -- <command>   run a command, then report success or
                                       failure (with its duration, and on
@@ -70,7 +73,8 @@ def main(argv=None):
     cmd, rest = args[0], args[1:]
     if cmd == "backup" and "--detect" in rest:
         from . import backup
-        code, _, lines = backup.run(None, rest)
+        # --detect needs no token; one given before the folder is skipped.
+        code, _, lines, _ = backup.run(None, rest if rest[0] == "--detect" else rest[1:])
         for line in lines:
             print(line, file=sys.stderr if code else sys.stdout)
         return code
@@ -83,7 +87,17 @@ def main(argv=None):
     if cmd in ("ping", "fail"):
         try:
             if cmd == "ping":
-                ping(token)
+                value = None
+                if "--value" in rest:
+                    i = rest.index("--value")
+                    try:
+                        value = float(rest[i + 1])
+                        if value != value or value in (float("inf"), float("-inf")):
+                            raise ValueError
+                    except (IndexError, ValueError):
+                        warn("--value needs a number")
+                        return 2
+                ping(token, value=value, unit="bytes" if "--bytes" in rest else None)
             else:
                 fail(token, message=" ".join(rest).strip() or None)
             return 0
@@ -96,11 +110,14 @@ def main(argv=None):
             from . import git as check
         else:
             from . import backup as check
-        code, message, lines = check.run(token, rest)
+        code, message, lines, *more = check.run(token, rest)
         for line in lines:
             print(line, file=sys.stderr if code else sys.stdout)
+        # backup sends the newest full backup's size along, for the chart.
+        size = more[0] if more else None
+        extra = {"value": size, "unit": "bytes"} if size is not None else {}
         try:
-            (ping if code == 0 else fail)(token, message=message)
+            (ping if code == 0 else fail)(token, message=message, **extra)
         except (TockwardError, ValueError) as err:
             warn(f"could not report: {err}")
             return code or 1

@@ -6,13 +6,15 @@
 //   await tockward.fail('abc123');            // "I failed"
 //   await tockward.ping('abc123', { ms: 4200 }); // with the run's duration
 //   await tockward.fail('abc123', { message: 'disk full' }); // say why
+//   await tockward.ping('abc123', { value: 12400 }); // a number to chart
+//   await tockward.ping('abc123', { value: 145278836, unit: 'bytes' }); // a size
 //
 // A token can also be a full ping URL (https://.../v1/beat/<token>), so URLs
 // copied from the dashboard work as they are. TOCKWARD_URL overrides the base.
 
 const DEFAULT_BASE = 'https://ping.tockward.com';
 
-function beatUrl(token, ok, ms) {
+function beatUrl(token, ok, ms, value, unit) {
   if (!token || typeof token !== 'string') throw new Error('missing token');
   let url;
   if (/^https?:\/\//i.test(token)) {
@@ -22,15 +24,18 @@ function beatUrl(token, ok, ms) {
     url = `${base}/v1/beat/${encodeURIComponent(token)}`;
   }
   if (!ok) url += '/fail';
-  if (Number.isFinite(ms)) url += `?ms=${Math.max(0, Math.round(ms))}`;
-  return url;
+  const query = [];
+  if (Number.isFinite(ms)) query.push(`ms=${Math.max(0, Math.round(ms))}`);
+  if (Number.isFinite(value)) query.push(`value=${value}`);
+  if (Number.isFinite(value) && unit === 'bytes') query.push('unit=bytes');
+  return query.length ? `${url}?${query.join('&')}` : url;
 }
 
 // The server keeps up to 500 characters; the first line is the alert's reason.
 const MESSAGE_MAX = 500;
 
-async function send(token, ok, { ms, message, timeout = 10000, retries = 2 } = {}) {
-  const url = beatUrl(token, ok, ms);
+async function send(token, ok, { ms, message, value, unit, timeout = 10000, retries = 2 } = {}) {
+  const url = beatUrl(token, ok, ms, value, unit);
   const body = message ? String(message).slice(0, MESSAGE_MAX) : undefined;
   const headers = body ? { 'Content-Type': 'text/plain; charset=utf-8' } : undefined;
   let lastError;

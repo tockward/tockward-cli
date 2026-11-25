@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tockward"
-version = "0.3.0"
+version = "0.4.0"
 description = "Heartbeat client for Tockward: know when your cron jobs, scripts and devices go silent."
 readme = "README.md"
 license = "MIT"
