@@ -7,6 +7,9 @@
 //   mirror (default)  every repo under the folder (a Git server's repos):
 //                     are its branches and tags the same as the hosted
 //                     remote (GitHub, GitLab, Bitbucket, else origin)?
+//                     With --compare-with: the same, against a URL per
+//                     repo, for servers that are only pushed to (push to
+//                     both) and so have no remote.
 //   deploy (--deploy) one checkout (a production server): nothing changed
 //                     by hand, on the expected branch, on the remote's
 //                     latest commit.
@@ -24,12 +27,17 @@ const GIT_TIMEOUT = 60000;
 
 class CheckError extends Error {}
 
+// Extra git config for every git call (the tokens for --compare-with), as
+// GIT_CONFIG_* environment variables: never on a command line, where other
+// users could see it in ps, and never in a URL that can end up in a message.
+let gitEnv = {};
+
 function git(dir, args, { allowFail = false } = {}) {
   const r = spawnSync('git', ['-C', dir, ...args], {
     encoding: 'utf8',
     timeout: GIT_TIMEOUT,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...gitEnv },
   });
   if (r.error) {
     if (r.error.code === 'ENOENT') throw new CheckError('git is not installed');
@@ -53,7 +61,7 @@ function parseDuration(text) {
 }
 
 function parseArgs(args) {
-  const o = { folder: '.', deploy: false, branch: null, remote: null, behindAfter: 0, depth: 3 };
+  const o = { folder: '.', deploy: false, branch: null, remote: null, behindAfter: 0, depth: 3, compareWith: null, map: {}, skip: [], tokenFile: null };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     const value = () => {
@@ -65,10 +73,73 @@ function parseArgs(args) {
     else if (a === '--remote') o.remote = value();
     else if (a === '--behind-after') o.behindAfter = parseDuration(value());
     else if (a === '--depth') o.depth = Math.max(0, parseInt(value(), 10) || 0);
+    else if (a === '--compare-with') o.compareWith = value();
+    else if (a === '--map') {
+      const m = /^([^=]+)=(.+)$/.exec(value());
+      if (!m) throw new CheckError('--map needs repo=url, e.g. --map app=https://github.com/acme/app');
+      o.map[repoName(m[1].trim()).toLowerCase()] = m[2].trim();
+    }
+    else if (a === '--skip') o.skip.push(...value().split(',').map(s => repoName(s.trim()).toLowerCase()).filter(Boolean));
+    else if (a === '--token-file') o.tokenFile = value();
     else if (a.startsWith('--')) throw new CheckError(`unknown option ${a}`);
     else o.folder = a;
   }
+  if (o.compareWith || Object.keys(o.map).length || o.skip.length || o.tokenFile) {
+    if (o.deploy) throw new CheckError('--compare-with, --map, --skip and --token-file are for a folder of repos, not --deploy');
+    if (o.remote) throw new CheckError('use --remote or --compare-with, not both');
+    if (!o.compareWith) throw new CheckError('--map, --skip and --token-file go with --compare-with');
+    if (!o.compareWith.includes('{repo}')) throw new CheckError('--compare-with needs {repo} in it, e.g. https://github.com/acme/{repo}');
+  }
   return o;
+}
+
+// A repo's name: its folder without .git ("app.git" -> "app").
+const repoName = p => path.basename(p).replace(/\.git$/i, '');
+
+// "GitHub" for a github.com URL, and so on; else the host.
+function urlName(url) {
+  const host = (/^[a-z+]+:\/\/(?:[^@/]*@)?([^/:]+)/i.exec(url) || /^[^@]+@([^:]+):/.exec(url) || [])[1] || url;
+  return { 'github.com': 'GitHub', 'gitlab.com': 'GitLab', 'bitbucket.org': 'Bitbucket' }[host.toLowerCase()] || host;
+}
+
+// --token-file: one token for the --compare-with host, or lines
+// "<url prefix> <token>" (a GitHub fine-grained token covers one owner, so
+// two owners need two). Sent as HTTP basic auth, only to matching URLs.
+function tokenConfig(o) {
+  let text = process.env.TOCKWARD_GIT_TOKEN || '';
+  if (o.tokenFile) {
+    try { text = fs.readFileSync(o.tokenFile, 'utf8'); } catch (err) {
+      const why = { ENOENT: 'no such file', EACCES: 'permission denied', EISDIR: 'is a folder' }[err.code] || err.message;
+      throw new CheckError(`can't read the token file ${o.tokenFile} (${why})`);
+    }
+  }
+  const pairs = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const parts = line.split(/\s+/);
+    if (parts.length === 1) {
+      const m = /^(https?:\/\/[^/]+\/)/i.exec(o.compareWith);
+      if (!m) throw new CheckError('a token works with an https:// --compare-with URL only');
+      pairs.push([m[1], parts[0]]);
+    } else pairs.push([parts[0].endsWith('/') ? parts[0] : `${parts[0]}/`, parts[1]]);
+  }
+  const env = {};
+  pairs.forEach(([prefix, token], i) => {
+    env[`GIT_CONFIG_KEY_${i}`] = `http.${prefix}.extraHeader`;
+    env[`GIT_CONFIG_VALUE_${i}`] = `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`;
+  });
+  if (pairs.length) env.GIT_CONFIG_COUNT = String(pairs.length);
+  return env;
+}
+
+// git's own words for "no access" made into what to do about it.
+function accessHint(message) {
+  if (/could not read Username|terminal prompts disabled|Authentication failed|403/i.test(message)) {
+    return gitEnv.GIT_CONFIG_COUNT ? 'no access: the token was refused, or it can\'t read this repo' : 'no access: a private repo needs a token (--token-file)';
+  }
+  if (/not found/i.test(message)) return 'not found, or the token can\'t read it';
+  return message;
 }
 
 const isRepo = dir => fs.existsSync(path.join(dir, '.git'))
@@ -121,16 +192,17 @@ function names(list) {
   return list.length > 3 ? `${shown} and ${list.length - 3} more` : shown;
 }
 
-// One repo against its remote. Returns { problems: [{kind, text}], skipped }.
-function checkMirror(dir, label, remoteWanted) {
-  const remote = pickRemote(dir, remoteWanted);
+// One repo against its remote, or against a URL (--compare-with). Returns
+// { problems: [{kind, text}], skipped }.
+function checkMirror(dir, label, remoteWanted, url = null) {
+  const remote = url ? urlName(url) : pickRemote(dir, remoteWanted);
   if (!remote && remoteWanted) return { problems: [{ kind: 'error', text: `${label}: no remote ${remoteWanted}` }] };
   if (!remote) return { skipped: true };
   let theirs;
   try {
-    theirs = refMap(git(dir, ['ls-remote', '--heads', '--tags', remote]));
+    theirs = refMap(git(dir, ['ls-remote', '--heads', '--tags', url || remote]));
   } catch (err) {
-    return { problems: [{ kind: 'error', text: `${label}: ${remote} unreachable (${err.message})` }] };
+    return { problems: [{ kind: 'error', text: `${label}: ${remote} unreachable (${url ? accessHint(err.message) : err.message})` }] };
   }
   const ours = refMap(git(dir, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads', 'refs/tags']));
   const behind = [], ahead = [], differs = [];
@@ -239,15 +311,26 @@ function run(token, args) {
     } else {
       const repos = findRepos(folder, o.depth);
       if (!repos.length) throw new CheckError(`no git repos found in ${o.folder}`);
+      if (o.compareWith) gitEnv = tokenConfig(o);
       let skipped = 0;
       for (const dir of repos) {
         const label = path.relative(folder, dir) || path.basename(dir);
-        const r = checkMirror(dir, label, o.remote);
+        const name = repoName(dir);
+        if (o.compareWith && o.skip.includes(name.toLowerCase())) { skipped++; continue; }
+        const url = o.compareWith ? (o.map[name.toLowerCase()] || o.compareWith.split('{repo}').join(name)) : null;
+        const r = checkMirror(dir, label, o.remote, url);
         if (r.skipped) skipped++;
         else problems.push(...r.problems);
       }
       const checked = repos.length - skipped;
-      summary = `${checked} repo${checked === 1 ? '' : 's'} checked${skipped ? `, ${skipped} without a remote skipped` : ''}`;
+      // Nothing compared is no proof of anything: fail rather than say ok.
+      if (!checked) {
+        throw new CheckError(o.compareWith
+          ? `all ${repos.length} repos in ${o.folder} are skipped: nothing was compared`
+          : `none of the ${repos.length} repos in ${o.folder} has a remote to compare with; for a server that is only pushed to, use --compare-with`);
+      }
+      const against = o.compareWith ? ` against ${urlName(o.compareWith)}` : '';
+      summary = `${checked} repo${checked === 1 ? '' : 's'} checked${against}${skipped ? `, ${skipped} ${o.compareWith ? 'skipped' : 'without a remote skipped'}` : ''}`;
     }
     const { problems: kept, waiting } = applyBehindAfter(problems, o.behindAfter, token, folder);
     kept.sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind));

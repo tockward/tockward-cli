@@ -5,7 +5,10 @@ pull. Uses this machine's own git setup and access.
 
   mirror (default)  every repo under the folder (a Git server's repos): are
                     its branches and tags the same as the hosted remote
-                    (GitHub, GitLab, Bitbucket, else origin)?
+                    (GitHub, GitLab, Bitbucket, else origin)? With
+                    --compare-with: the same, against a URL per repo, for
+                    servers that are only pushed to (push to both) and so
+                    have no remote.
   deploy (--deploy) one checkout (a production server): nothing changed by
                     hand, on the expected branch, on the remote's latest
                     commit.
@@ -13,6 +16,7 @@ pull. Uses this machine's own git setup and access.
 Same behaviour and output as the npm client (git.js).
 """
 
+import base64
 import hashlib
 import json
 import os
@@ -28,8 +32,14 @@ class CheckError(Exception):
     pass
 
 
+# Extra git config for every git call (the tokens for --compare-with), as
+# GIT_CONFIG_* environment variables: never on a command line, where other
+# users could see it in ps, and never in a URL that can end up in a message.
+_git_env = {}
+
+
 def _git(d, args, allow_fail=False):
-    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", LC_ALL="C")
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", LC_ALL="C", **_git_env)
     try:
         r = subprocess.run(["git", "-C", d, *args], stdin=subprocess.DEVNULL, capture_output=True,
                            text=True, timeout=GIT_TIMEOUT, env=env)
@@ -57,7 +67,8 @@ def parse_duration(text):
 
 
 def parse_args(args):
-    o = {"folder": ".", "deploy": False, "branch": None, "remote": None, "behind_after": 0, "depth": 3}
+    o = {"folder": ".", "deploy": False, "branch": None, "remote": None, "behind_after": 0, "depth": 3,
+         "compare_with": None, "map": {}, "skip": [], "token_file": None}
     i = 0
     while i < len(args):
         a = args[i]
@@ -80,12 +91,89 @@ def parse_args(args):
         elif a == "--depth":
             v = value()
             o["depth"] = max(0, int(v)) if v.isdigit() else 0
+        elif a == "--compare-with":
+            o["compare_with"] = value()
+        elif a == "--map":
+            m = re.match(r"^([^=]+)=(.+)$", value())
+            if not m:
+                raise CheckError("--map needs repo=url, e.g. --map app=https://github.com/acme/app")
+            o["map"][_repo_name(m.group(1).strip()).lower()] = m.group(2).strip()
+        elif a == "--skip":
+            o["skip"] += [_repo_name(s.strip()).lower() for s in value().split(",") if s.strip()]
+        elif a == "--token-file":
+            o["token_file"] = value()
         elif a.startswith("--"):
             raise CheckError(f"unknown option {a}")
         else:
             o["folder"] = a
         i += 1
+    if o["compare_with"] or o["map"] or o["skip"] or o["token_file"]:
+        if o["deploy"]:
+            raise CheckError("--compare-with, --map, --skip and --token-file are for a folder of repos, not --deploy")
+        if o["remote"]:
+            raise CheckError("use --remote or --compare-with, not both")
+        if not o["compare_with"]:
+            raise CheckError("--map, --skip and --token-file go with --compare-with")
+        if "{repo}" not in o["compare_with"]:
+            raise CheckError("--compare-with needs {repo} in it, e.g. https://github.com/acme/{repo}")
     return o
+
+
+def _repo_name(p):
+    """A repo's name: its folder without .git ("app.git" -> "app")."""
+    return re.sub(r"\.git$", "", os.path.basename(p.rstrip("/")), flags=re.I)
+
+
+def _url_name(url):
+    """"GitHub" for a github.com URL, and so on; else the host."""
+    m = re.match(r"^[a-z+]+://(?:[^@/]*@)?([^/:]+)", url, re.I) or re.match(r"^[^@]+@([^:]+):", url)
+    host = m.group(1) if m else url
+    return {"github.com": "GitHub", "gitlab.com": "GitLab", "bitbucket.org": "Bitbucket"}.get(host.lower(), host)
+
+
+def _token_config(o):
+    """--token-file: one token for the --compare-with host, or lines
+    "<url prefix> <token>" (a GitHub fine-grained token covers one owner, so
+    two owners need two). Sent as HTTP basic auth, only to matching URLs."""
+    text = os.environ.get("TOCKWARD_GIT_TOKEN", "")
+    if o["token_file"]:
+        try:
+            with open(o["token_file"]) as fh:
+                text = fh.read()
+        except OSError as err:
+            why = (err.strerror or str(err)).lower()
+            raise CheckError(f"can't read the token file {o['token_file']} ({'no such file' if why == 'no such file or directory' else why})") from None
+    pairs = []
+    for raw in text.split("\n"):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) == 1:
+            m = re.match(r"^(https?://[^/]+/)", o["compare_with"], re.I)
+            if not m:
+                raise CheckError("a token works with an https:// --compare-with URL only")
+            pairs.append((m.group(1), parts[0]))
+        else:
+            pairs.append((parts[0] if parts[0].endswith("/") else parts[0] + "/", parts[1]))
+    env = {}
+    for i, (prefix, token) in enumerate(pairs):
+        env[f"GIT_CONFIG_KEY_{i}"] = f"http.{prefix}.extraHeader"
+        env[f"GIT_CONFIG_VALUE_{i}"] = "Authorization: Basic " + base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    if pairs:
+        env["GIT_CONFIG_COUNT"] = str(len(pairs))
+    return env
+
+
+def _access_hint(message):
+    """git's own words for "no access" made into what to do about it."""
+    if re.search(r"could not read Username|terminal prompts disabled|Authentication failed|403", message, re.I):
+        if _git_env.get("GIT_CONFIG_COUNT"):
+            return "no access: the token was refused, or it can't read this repo"
+        return "no access: a private repo needs a token (--token-file)"
+    if re.search(r"not found", message, re.I):
+        return "not found, or the token can't read it"
+    return message
 
 
 def _is_repo(d):
@@ -105,7 +193,7 @@ def find_repos(root, depth):
         if level >= depth:
             return
         try:
-            entries = sorted(os.scandir(d), key=lambda e: e.name)
+            entries = sorted(os.scandir(d), key=lambda e: (e.name.lower(), e.name))  # as the npm client
         except OSError:
             return
         for e in entries:
@@ -158,16 +246,18 @@ def _names(items):
     return f"{shown} and {len(items) - 3} more" if len(items) > 3 else shown
 
 
-def _check_mirror(d, label, remote_wanted):
-    remote = _pick_remote(d, remote_wanted)
+def _check_mirror(d, label, remote_wanted, url=None):
+    """One repo against its remote, or against a URL (--compare-with)."""
+    remote = _url_name(url) if url else _pick_remote(d, remote_wanted)
     if not remote and remote_wanted:
         return {"problems": [{"kind": "error", "text": f"{label}: no remote {remote_wanted}"}]}
     if not remote:
         return {"skipped": True}
     try:
-        theirs = _ref_map(_git(d, ["ls-remote", "--heads", "--tags", remote]))
+        theirs = _ref_map(_git(d, ["ls-remote", "--heads", "--tags", url or remote]))
     except CheckError as err:
-        return {"problems": [{"kind": "error", "text": f"{label}: {remote} unreachable ({err})"}]}
+        why = _access_hint(str(err)) if url else err
+        return {"problems": [{"kind": "error", "text": f"{label}: {remote} unreachable ({why})"}]}
     ours = _ref_map(_git(d, ["for-each-ref", "--format=%(objectname) %(refname)", "refs/heads", "refs/tags"]))
     behind, ahead, differs = [], [], []
     for ref, h in theirs.items():
@@ -308,18 +398,34 @@ def run(token, args):
             repos = find_repos(folder, o["depth"])
             if not repos:
                 raise CheckError(f"no git repos found in {o['folder']}")
+            if o["compare_with"]:
+                _git_env.clear()
+                _git_env.update(_token_config(o))
             skipped = 0
             for d in repos:
                 label = os.path.relpath(d, folder)
                 if label == ".":
                     label = os.path.basename(d)
-                r = _check_mirror(d, label, o["remote"])
+                name = _repo_name(d)
+                if o["compare_with"] and name.lower() in o["skip"]:
+                    skipped += 1
+                    continue
+                url = (o["map"].get(name.lower()) or o["compare_with"].replace("{repo}", name)) if o["compare_with"] else None
+                r = _check_mirror(d, label, o["remote"], url)
                 if r.get("skipped"):
                     skipped += 1
                 else:
                     problems.extend(r["problems"])
             checked = len(repos) - skipped
-            summary = f"{_plural(checked, 'repo')} checked" + (f", {skipped} without a remote skipped" if skipped else "")
+            # Nothing compared is no proof of anything: fail rather than say ok.
+            if not checked:
+                if o["compare_with"]:
+                    raise CheckError(f"all {len(repos)} repos in {o['folder']} are skipped: nothing was compared")
+                raise CheckError(f"none of the {len(repos)} repos in {o['folder']} has a remote to compare with; "
+                                 "for a server that is only pushed to, use --compare-with")
+            against = f" against {_url_name(o['compare_with'])}" if o["compare_with"] else ""
+            summary = f"{_plural(checked, 'repo')} checked{against}" + (
+                f", {skipped} {'skipped' if o['compare_with'] else 'without a remote skipped'}" if skipped else "")
         kept, waiting = _apply_behind_after(problems, o["behind_after"], token, folder)
         kept.sort(key=lambda p: ORDER.index(p["kind"]))
         if not kept:

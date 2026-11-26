@@ -48,6 +48,10 @@ a short summary: repo, branch and commit names, never file names or code.
 # Git server: every repo under /srv/git has the same branches and tags as GitHub/GitLab
 0 * * * *  tockward git <token> /srv/git --behind-after 12h
 
+# Push to both (GitHub and your own Git server): the server's repos have no remote,
+# so compare each with its GitHub URL; {repo} = folder name without .git
+0 * * * *  tockward git <token> /srv/git --compare-with "https://github.com/acme/{repo}" --token-file ~/.config/tockward/github-token --skip canary
+
 # Production: nothing changed by hand, on the latest commit of main
 */15 * * * *  tockward git <token> /var/www/app --deploy --branch main --behind-after 30m
 ```
@@ -57,11 +61,18 @@ a short summary: repo, branch and commit names, never file names or code.
 | `--deploy` | the folder is one checkout (production) instead of a folder of repos |
 | `--branch <name>` | the branch it should be on (deploy; default: the current one) |
 | `--remote <name>` | compare with this remote (default: the GitHub, GitLab or Bitbucket one, else `origin`) |
+| `--compare-with <url>` | compare each repo with this URL instead of a remote (push to both); `{repo}` = the folder name without `.git` |
+| `--map <repo>=<url>` | with `--compare-with`: another URL for one repo (another name or owner) |
+| `--skip <repo>` | with `--compare-with`: leave a repo out (`--skip a,b` for more) |
+| `--token-file <file>` | with `--compare-with`: a read-only token for private repos (GitHub fine-grained, Contents: read-only), or lines `<url prefix> <token>`, one per owner; or set `TOCKWARD_GIT_TOKEN`. Only sent to matching URLs, never in a report |
 | `--behind-after <t>` | only alert when it has been behind for longer than `t` (`30m`, `2h`, `1d`), so a deploy or mirror sync in progress doesn't alert |
 | `--depth <n>` | how deep to look for repos under the folder (default 3) |
 
 A checkout without a remote (code pushed straight into the folder it runs from) has nothing to compare
 with: then `--deploy` only checks for files changed by hand and the branch.
+
+A folder of repos where none has a remote to compare with fails ("nothing was compared")
+rather than reporting ok.
 
 Exit code 0 when all is well, 1 when something's wrong, 2 when the check itself couldn't run.
 

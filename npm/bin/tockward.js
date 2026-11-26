@@ -37,6 +37,15 @@ git options:
   --branch <name>      the branch it should be on (deploy)
   --remote <name>      compare with this remote (default: GitHub, GitLab or
                        Bitbucket, else origin)
+  --compare-with <url> compare each repo with this URL instead of a remote,
+                       for a server that is only pushed to (push to both);
+                       {repo} = the repo's folder without .git, e.g.
+                       https://github.com/acme/{repo}
+  --map <repo>=<url>   another URL for one repo (with --compare-with)
+  --skip <repo>        leave a repo out (with --compare-with)
+  --token-file <file>  a read-only token for private repos (with
+                       --compare-with), or lines "<url prefix> <token>",
+                       one per owner; or set TOCKWARD_GIT_TOKEN
   --behind-after <t>   only alert when behind for longer than t (30m, 2h)
   --depth <n>          how deep to look for repos (default 3)
 
