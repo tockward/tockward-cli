@@ -5,7 +5,7 @@ import sys
 import threading
 import time
 
-from . import OutputTail, TockwardError, __version__, fail, failure_message, ping
+from . import OutputTail, TockwardError, __version__, fail, failure_message, ping, success_summary
 
 USAGE = """Tockward: know when your cron jobs, scripts and devices go silent.
 
@@ -15,10 +15,13 @@ Usage:
                                       with a number to chart (a size with
                                       --bytes)
   tockward fail <token> [message]     report a failed run, optionally why
-  tockward run <token> -- <command>   run a command, then report success or
-                                      failure (with its duration, and on
-                                      failure its last output lines); exits
-                                      with the command's exit code
+  tockward run <token> [--no-summary] -- <command>
+                                      run a command, then report success or
+                                      failure with its duration and output:
+                                      on success its last line (the summary
+                                      on the dashboard; --no-summary leaves
+                                      it out), on failure its last lines;
+                                      exits with the command's exit code
   tockward git <token> [folder] [options]
                                       check git repos and report: ok, or
                                       fail with what's wrong (read-only)
@@ -124,13 +127,16 @@ def main(argv=None):
         return code
 
     if cmd == "run":
-        command = rest[1:] if rest[:1] == ["--"] else rest
+        no_summary = rest[:1] == ["--no-summary"]
+        args = rest[1:] if no_summary else rest
+        command = args[1:] if args[:1] == ["--"] else args
         if not command:
             warn("nothing to run; use: tockward run <token> -- <command>")
             return 2
         started = time.monotonic()
         # Output still goes to the terminal or cron log as it comes; the
-        # last lines are kept for the failure message.
+        # last lines are kept: the last one is the summary of a successful
+        # run, all of them go with a failure.
         tail = OutputTail()
         lock = threading.Lock()
 
@@ -167,7 +173,7 @@ def main(argv=None):
         ms = (time.monotonic() - started) * 1000
         try:
             if code == 0:
-                ping(token, ms=ms)
+                ping(token, ms=ms, message=None if no_summary else (success_summary(tail.last) or None))
             else:
                 fail(token, ms=ms, message=failure_message(headline, tail.last))
         except (TockwardError, ValueError) as err:

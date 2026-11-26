@@ -73,6 +73,13 @@ class OutputTail {
   get last() { if (this.partial) { this.push(this.partial); this.partial = ''; } return this.lines; }
 }
 
+// After a successful run: its last output line, as the summary the dashboard
+// shows ("5 sensors ok"). Empty when it printed nothing.
+const SUMMARY_MAX = 200;
+function successSummary(lines) {
+  return lines.length ? lines[lines.length - 1].trim().slice(0, SUMMARY_MAX) : '';
+}
+
 // "exited with code 3: <last line>", then as much of the last output as fits.
 function failureMessage(headline, lines) {
   const first = (lines.length ? `${headline}: ${lines[lines.length - 1].trim()}` : headline).slice(0, 200);
@@ -89,6 +96,7 @@ function failureMessage(headline, lines) {
 }
 
 module.exports = {
+  successSummary,
   OutputTail,
   failureMessage,
   ping: (token, opts) => send(token, true, opts),

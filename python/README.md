@@ -28,7 +28,9 @@ tockward backup <token> /backups/db    # check backup files (see below)
 `tockward run` passes the command's output through, sends its duration along, and exits
 with the command's own exit code, so it drops straight into a crontab. When the command
 fails, the last lines of its output go along too, so the alert says why
-(`exited with code 3: error: disk full`):
+(`exited with code 3: error: disk full`). When it succeeds, its last output line goes
+along as a summary the dashboard shows (`5 sensors ok`); `--no-summary` leaves it out,
+for jobs whose output should stay on the server:
 
 ```cron
 0 3 * * *  tockward run abc123 -- /usr/local/bin/backup.sh

@@ -2,7 +2,7 @@
 'use strict';
 const { spawn } = require('child_process');
 const os = require('os');
-const { ping, fail, OutputTail, failureMessage } = require('..');
+const { ping, fail, OutputTail, failureMessage, successSummary } = require('..');
 const { version } = require('../package.json');
 
 const USAGE = `Tockward: know when your cron jobs, scripts and devices go silent.
@@ -13,10 +13,13 @@ Usage:
                                       with a number to chart (a size with
                                       --bytes)
   tockward fail <token> [message]     report a failed run, optionally why
-  tockward run <token> -- <command>   run a command, then report success or
-                                      failure (with its duration, and on
-                                      failure its last output lines); exits
-                                      with the command's exit code
+  tockward run <token> [--no-summary] -- <command>
+                                      run a command, then report success or
+                                      failure with its duration and output:
+                                      on success its last line (the summary
+                                      on the dashboard; --no-summary leaves
+                                      it out), on failure its last lines;
+                                      exits with the command's exit code
   tockward git <token> [folder] [options]
                                       check git repos and report: ok, or
                                       fail with what's wrong (read-only)
@@ -95,11 +98,14 @@ async function main(argv) {
   }
 
   if (cmd === 'run') {
-    const command = rest[0] === '--' ? rest.slice(1) : rest;
+    const noSummary = rest[0] === '--no-summary';
+    const args = noSummary ? rest.slice(1) : rest;
+    const command = args[0] === '--' ? args.slice(1) : args;
     if (!command.length) { warn('nothing to run; use: tockward run <token> -- <command>'); return 2; }
     const started = Date.now();
     // Output still goes to the terminal or cron log as it comes; the last
-    // lines are kept for the failure message.
+    // lines are kept: the last one is the summary of a successful run, all
+    // of them go with a failure.
     const tail = new OutputTail();
     let headline = '';
     const code = await new Promise(resolve => {
@@ -118,7 +124,8 @@ async function main(argv) {
       });
     });
     const ms = Date.now() - started;
-    try { await (code === 0 ? ping(token, { ms }) : fail(token, { ms, message: failureMessage(headline, tail.last) })); }
+    const summary = noSummary ? '' : successSummary(tail.last);
+    try { await (code === 0 ? ping(token, { ms, message: summary }) : fail(token, { ms, message: failureMessage(headline, tail.last) })); }
     catch (err) { warn(`could not report: ${err.message}`); }
     return code;
   }

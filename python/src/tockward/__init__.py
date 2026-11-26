@@ -19,8 +19,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.4.0"
-__all__ = ["ping", "fail", "beat_url", "TockwardError", "OutputTail", "failure_message"]
+__version__ = "0.5.0"
+__all__ = ["ping", "fail", "beat_url", "TockwardError", "OutputTail", "failure_message", "success_summary"]
 
 DEFAULT_BASE = "https://ping.tockward.com"
 # The server keeps up to 500 characters; the first line is the alert's reason.
@@ -125,6 +125,15 @@ class OutputTail:
             self._push(self.partial)
             self.partial = ""
         return self.lines
+
+
+SUMMARY_MAX = 200
+
+
+def success_summary(lines):
+    """After a successful run: its last output line, as the summary the
+    dashboard shows ("5 sensors ok"). Empty when it printed nothing."""
+    return lines[-1].strip()[:SUMMARY_MAX] if lines else ""
 
 
 def failure_message(headline, lines):
